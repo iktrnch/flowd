@@ -36,6 +36,7 @@ describe('diagram export', () => {
 		expect(result?.svg).toContain('<pattern id="dot-grid"');
 		expect(result?.svg).toContain('<rect');
 		expect(result?.svg).not.toContain('foreignObject');
+		expect(result?.svg).not.toContain('connection-preview');
 	});
 
 	it('escapes XML and sanitises filenames', () => {

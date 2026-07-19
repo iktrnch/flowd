@@ -6,12 +6,13 @@ A local-first, frontend-only diagramming canvas built with SvelteKit, TypeScript
 
 - Right-click empty canvas to create a rectangle.
 - Hold right-click to choose a shape from the radial wheel.
-- Left-drag from a shape to create an arrow; drop on empty canvas to create and connect a new shape.
-- Hold Alt/Option while dragging to move shapes.
+- Left-click a shape to select it, and left-drag it to move it.
+- Right-drag from a shape to create an arrow; drop on empty canvas to create and connect a new shape.
+- Left-drag empty canvas to select an area, and middle-drag to pan.
 - Double-click a shape to edit its text.
 - Use the bottom-right buttons for settings and SVG/PNG export.
 
-Standard selection, delete, duplicate, undo/redo, select-all, keyboard movement, middle-mouse pan, Space-drag pan, and wheel zoom shortcuts are supported.
+Shape and edge context menus provide mouse-only duplicate, shape-change, and delete actions. The mouse wheel and trackpad zoom the canvas without a modifier key.
 
 ## Commands
 

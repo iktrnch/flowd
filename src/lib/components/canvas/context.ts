@@ -4,5 +4,7 @@ export const DIAGRAM_CONTEXT = Symbol('diagram-context');
 
 export interface DiagramCanvasContext {
 	store: DiagramStore;
-	moveModifier: { active: boolean };
+	beginEditing: (nodeId: string) => void;
+	commitEditing: (nodeId: string, text: string) => void;
+	cancelEditing: (nodeId: string) => void;
 }

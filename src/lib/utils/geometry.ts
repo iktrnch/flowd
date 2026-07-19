@@ -1,5 +1,5 @@
 import { getShapeDefinition } from '$lib/config/shapes';
-import type { DiagramNode, Point, Rect, ShapeType } from '$lib/types/diagram';
+import type { DiagramEdge, DiagramNode, Point, Rect, ShapeType } from '$lib/types/diagram';
 
 const EPSILON = 0.0001;
 
@@ -14,6 +14,94 @@ export function getNodeSize(node: DiagramNode): { width: number; height: number 
 export function getNodeRect(node: DiagramNode): Rect {
 	const { width, height } = getNodeSize(node);
 	return { x: node.position.x, y: node.position.y, width, height };
+}
+
+export function isPointInShape(shape: ShapeType, rect: Rect, point: Point): boolean {
+	if (
+		point.x < rect.x ||
+		point.x > rect.x + rect.width ||
+		point.y < rect.y ||
+		point.y > rect.y + rect.height
+	)
+		return false;
+
+	const center = getRectCenter(rect);
+	const normalizedX = Math.abs(point.x - center.x) / (rect.width / 2);
+	const normalizedY = Math.abs(point.y - center.y) / (rect.height / 2);
+	if (shape === 'ellipse') return normalizedX * normalizedX + normalizedY * normalizedY <= 1;
+	if (shape === 'diamond') return normalizedX + normalizedY <= 1;
+	if (shape !== 'rounded-rectangle') return true;
+
+	const radius = Math.min(getShapeDefinition(shape).cornerRadius, rect.width / 2, rect.height / 2);
+	const innerLeft = rect.x + radius;
+	const innerRight = rect.x + rect.width - radius;
+	const innerTop = rect.y + radius;
+	const innerBottom = rect.y + rect.height - radius;
+	if (
+		(point.x >= innerLeft && point.x <= innerRight) ||
+		(point.y >= innerTop && point.y <= innerBottom)
+	)
+		return true;
+	const cornerX = point.x < center.x ? innerLeft : innerRight;
+	const cornerY = point.y < center.y ? innerTop : innerBottom;
+	return Math.hypot(point.x - cornerX, point.y - cornerY) <= radius;
+}
+
+export function findNodeAtPoint(
+	nodes: DiagramNode[],
+	point: Point,
+	excludeNodeId?: string
+): DiagramNode | undefined {
+	return [...nodes]
+		.reverse()
+		.find(
+			(node) =>
+				node.id !== excludeNodeId && isPointInShape(node.data.shape, getNodeRect(node), point)
+		);
+}
+
+export type ConnectionDropResult =
+	{ type: 'source' } | { type: 'target'; node: DiagramNode } | { type: 'empty' };
+
+export function classifyConnectionDrop(
+	nodes: DiagramNode[],
+	sourceNodeId: string,
+	point: Point
+): ConnectionDropResult {
+	const source = nodes.find((node) => node.id === sourceNodeId);
+	if (source && isPointInShape(source.data.shape, getNodeRect(source), point)) {
+		return { type: 'source' };
+	}
+	const target = findNodeAtPoint(nodes, point, sourceNodeId);
+	return target ? { type: 'target', node: target } : { type: 'empty' };
+}
+
+export function distanceToSegment(point: Point, start: Point, end: Point): number {
+	const dx = end.x - start.x;
+	const dy = end.y - start.y;
+	const lengthSquared = dx * dx + dy * dy;
+	if (lengthSquared < EPSILON) return Math.hypot(point.x - start.x, point.y - start.y);
+	const projection = Math.max(
+		0,
+		Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)
+	);
+	return Math.hypot(point.x - (start.x + projection * dx), point.y - (start.y + projection * dy));
+}
+
+export function findEdgeAtPoint(
+	nodes: DiagramNode[],
+	edges: DiagramEdge[],
+	point: Point,
+	tolerance: number
+): DiagramEdge | undefined {
+	const nodesById = new Map(nodes.map((node) => [node.id, node]));
+	return [...edges].reverse().find((edge) => {
+		const source = nodesById.get(edge.source);
+		const target = nodesById.get(edge.target);
+		if (!source || !target) return false;
+		const endpoints = getEdgeEndpoints(source, target);
+		return distanceToSegment(point, endpoints.source, endpoints.target) <= tolerance;
+	});
 }
 
 export function getRectCenter(rect: Rect): Point {

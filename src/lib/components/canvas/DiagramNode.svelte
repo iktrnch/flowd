@@ -4,7 +4,7 @@
 	import { getContext, tick } from 'svelte';
 	import { DIAGRAM_CONTEXT, type DiagramCanvasContext } from './context';
 
-	let { id, data, selected, isConnectable }: NodeProps<DiagramNodeType> = $props();
+	let { id, data }: NodeProps<DiagramNodeType> = $props();
 	const context = getContext<DiagramCanvasContext>(DIAGRAM_CONTEXT);
 	let draft = $state('');
 	let textarea = $state<HTMLTextAreaElement>();
@@ -22,13 +22,8 @@
 		}
 	});
 
-	function selectBeforeConnect(event: PointerEvent): void {
-		if (event.button !== 0 || editing) return;
-		context.store.selectNode(id, event.metaKey || event.ctrlKey);
-	}
-
 	function commit(): void {
-		if (editing && !cancelling) context.store.commitText(id, draft);
+		if (editing && !cancelling) context.commitEditing(id, draft);
 	}
 
 	function handleEditorKeydown(event: KeyboardEvent): void {
@@ -39,23 +34,22 @@
 		} else if (event.key === 'Escape') {
 			event.preventDefault();
 			cancelling = true;
-			context.store.cancelEditing();
+			context.cancelEditing(id);
 		}
 	}
 </script>
 
 <div
-	class:movement-active={context.moveModifier.active}
 	class="diagram-node"
 	data-diagram-node
+	data-diagram-node-id={id}
 	role="group"
 	aria-label={`${data.shape} shape`}
 	style:width={`${data.width}px`}
 	style:height={`${data.height}px`}
-	onpointerdowncapture={selectBeforeConnect}
 	ondblclick={(event) => {
 		event.stopPropagation();
-		context.store.startEditing(id);
+		context.beginEditing(id);
 	}}
 >
 	<svg class="shape-surface" viewBox={`0 0 ${data.width} ${data.height}`} aria-hidden="true">
@@ -95,12 +89,7 @@
 		<div class="node-label">{data.label}</div>
 	{/if}
 
-	<Handle
-		type="source"
-		position={Position.Top}
-		{isConnectable}
-		class={`whole-node-handle ${context.moveModifier.active || editing ? 'movement-disabled' : ''}`}
-	/>
+	<Handle type="source" position={Position.Top} isConnectable={false} class="edge-layout-anchor" />
 </div>
 
 <style>
@@ -110,11 +99,7 @@
 		place-items: center;
 		color: var(--shape-text-color);
 		font-size: var(--font-size);
-		cursor: crosshair;
-	}
-
-	.diagram-node.movement-active {
-		cursor: move;
+		cursor: grab;
 	}
 
 	.shape-surface {
@@ -161,20 +146,12 @@
 		overflow: hidden;
 	}
 
-	:global(.whole-node-handle) {
-		position: absolute !important;
-		inset: 0 !important;
-		z-index: 3 !important;
-		width: 100% !important;
-		height: 100% !important;
-		transform: none !important;
+	:global(.edge-layout-anchor) {
+		width: 1px !important;
+		height: 1px !important;
 		border: 0 !important;
-		border-radius: 0 !important;
 		background: transparent !important;
 		opacity: 0 !important;
-	}
-
-	:global(.whole-node-handle.movement-disabled) {
 		pointer-events: none !important;
 	}
 </style>

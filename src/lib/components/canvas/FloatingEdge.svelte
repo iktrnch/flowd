@@ -24,5 +24,12 @@
 		class={selected ? 'diagram-edge-path selected' : 'diagram-edge-path'}
 		style="stroke: var(--edge-color); stroke-width: var(--edge-width)"
 		data-diagram-edge
+		data-diagram-edge-id={id}
 	/>
 {/if}
+
+<style>
+	:global(path[data-diagram-edge]) {
+		stroke: transparent;
+	}
+</style>

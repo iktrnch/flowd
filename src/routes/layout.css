@@ -49,11 +49,7 @@ input:focus-visible {
 }
 
 .svelte-flow__node {
-	cursor: crosshair;
-}
-
-.svelte-flow__node.movement-active {
-	cursor: move;
+	cursor: grab;
 }
 
 .svelte-flow__edge.selected .diagram-edge-path {

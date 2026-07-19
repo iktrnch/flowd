@@ -16,12 +16,32 @@ export type ShapeWheelMode = 'right-hold-create' | 'connection-drop-create';
 export type CanvasInteractionState =
 	| { type: 'idle' }
 	| {
-			type: 'right-press-pending';
+			type: 'node-right-press';
 			pointerId: number;
-			screenOrigin: XYPosition;
-			flowOrigin: XYPosition;
+			sourceNodeId: string;
+			startScreenPosition: XYPosition;
+			currentScreenPosition: XYPosition;
+	  }
+	| {
+			type: 'connection-drag';
+			pointerId: number;
+			sourceNodeId: string;
+			startScreenPosition: XYPosition;
+			currentScreenPosition: XYPosition;
+	  }
+	| {
+			type: 'edge-right-press';
+			pointerId: number;
+			edgeId: string;
+			startScreenPosition: XYPosition;
+			currentScreenPosition: XYPosition;
+	  }
+	| {
+			type: 'pane-right-press';
+			pointerId: number;
+			startScreenPosition: XYPosition;
+			flowPosition: XYPosition;
 			startedAt: number;
-			moved: boolean;
 	  }
 	| {
 			type: 'shape-wheel';
@@ -31,6 +51,8 @@ export type CanvasInteractionState =
 			sourceNodeId?: string;
 			hoveredShape?: ShapeType;
 	  }
+	| { type: 'node-context-menu'; nodeId: string; screenPosition: XYPosition }
+	| { type: 'edge-context-menu'; edgeId: string; screenPosition: XYPosition }
 	| { type: 'editing-node'; nodeId: string; previousText: string };
 
 export interface DiagramDocument {

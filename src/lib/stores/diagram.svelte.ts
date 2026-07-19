@@ -91,20 +91,22 @@ export class DiagramStore {
 		const before = this.snapshot();
 		const added = this.addEdgeInternal(source, target);
 		if (added) {
+			this.nodes = this.nodes.map((node) => ({ ...node, selected: false }));
+			this.edges = this.edges.map((edge) => ({ ...edge, selected: edge.id === added.id }));
 			this.history.record(before, this.snapshot());
 			this.scheduleSave();
 		}
-		return added;
+		return added !== null;
 	}
 
-	private addEdgeInternal(source: string, target: string): boolean {
+	private addEdgeInternal(source: string, target: string): DiagramEdge | null {
 		if (
 			source === target ||
 			!this.nodes.some((node) => node.id === source) ||
 			!this.nodes.some((node) => node.id === target)
 		)
-			return false;
-		if (this.edges.some((edge) => edge.source === source && edge.target === target)) return false;
+			return null;
+		if (this.edges.some((edge) => edge.source === source && edge.target === target)) return null;
 		const edge: DiagramEdge = {
 			id: createEntityId('edge'),
 			type: 'floating',
@@ -114,7 +116,7 @@ export class DiagramStore {
 			ariaLabel: 'Arrow'
 		};
 		this.edges = [...this.edges, edge];
-		return true;
+		return edge;
 	}
 
 	selectNode(id: string, toggle = false): void {
