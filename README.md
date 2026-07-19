@@ -14,6 +14,10 @@ A local-first, frontend-only diagramming canvas built with SvelteKit, TypeScript
 
 Shape and edge context menus provide mouse-only duplicate, shape-change, and delete actions. The mouse wheel and trackpad zoom the canvas without a modifier key.
 
+Optional keyboard accelerators are available outside text editors and dialogs: `Ctrl+Z` undoes,
+`Ctrl+Shift+Z` redoes, and `Delete` removes the current selection. Hold `Ctrl` while clicking
+or marquee-selecting to add items, or hold `Shift` to remove them.
+
 ## Commands
 
 ```sh

@@ -71,6 +71,13 @@ export interface DiagramSnapshot {
 	edges: DiagramEdge[];
 }
 
+export type SelectionOperation = 'replace' | 'add' | 'remove';
+
+export interface SelectionIds {
+	nodeIds: Set<string>;
+	edgeIds: Set<string>;
+}
+
 export interface Point extends XYPosition {}
 
 export interface Rect {

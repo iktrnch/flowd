@@ -12,15 +12,19 @@
 		DiagramEdge,
 		DiagramNode,
 		Point,
+		SelectionIds,
+		SelectionOperation,
 		ShapeType
 	} from '$lib/types/diagram';
 	import { classifyConnectionDrop, findEdgeAtPoint, findNodeAtPoint } from '$lib/utils/geometry';
+	import { isModalTarget, isTextInputTarget, resolveDiagramShortcut } from '$lib/utils/keyboard';
 	import {
 		advanceNodeRightGesture,
 		classifyRightRelease,
 		pointerMovedBeyondTolerance,
 		RIGHT_HOLD_DELAY_MS
 	} from '$lib/utils/pointer-gesture';
+	import { emptySelection, getSelectionOperation } from '$lib/utils/selection';
 	import { clampWheelCenter, shapeAtWheelPoint } from '$lib/utils/shape-wheel';
 	import {
 		Background,
@@ -43,6 +47,17 @@
 	const MIDDLE_BUTTON = 1;
 	const RIGHT_BUTTON = 2;
 	const DISABLED_FLOW_KEY = { key: '__flowd-disabled__' };
+	const NODE_DRAG_THRESHOLD_PX = 6;
+
+	type SelectionTarget =
+		{ type: 'node'; id: string } | { type: 'edge'; id: string } | { type: 'pane' };
+
+	interface PendingSelectionGesture {
+		pointerId: number;
+		operation: SelectionOperation;
+		base: SelectionIds;
+		target: SelectionTarget;
+	}
 
 	const store = new DiagramStore();
 	const flow = useSvelteFlow<DiagramNode, DiagramEdge>();
@@ -63,6 +78,7 @@
 	let viewport = $state({ x: 0, y: 0, zoom: 1 });
 	let holdTimer: ReturnType<typeof setTimeout> | null = null;
 	let capturedPointerId: number | null = null;
+	let pendingSelection = $state<PendingSelectionGesture | null>(null);
 
 	function beginEditing(nodeId: string): void {
 		clearHoldTimer();
@@ -92,20 +108,14 @@
 		store.load();
 		viewport = { ...store.document.viewport };
 		ready = true;
+		window.addEventListener('keydown', handleDiagramKeydown);
 		return () => {
+			window.removeEventListener('keydown', handleDiagramKeydown);
 			clearHoldTimer();
 			releaseCapture();
 			store.destroy();
 		};
 	});
-
-	function isTextTarget(target: EventTarget | null): boolean {
-		return (
-			target instanceof HTMLInputElement ||
-			target instanceof HTMLTextAreaElement ||
-			(target instanceof HTMLElement && target.isContentEditable)
-		);
-	}
 
 	function ownedNodeId(event: PointerEvent): string | undefined {
 		for (const target of event.composedPath()) {
@@ -150,6 +160,75 @@
 		return store.nodes.map(withMeasurement);
 	}
 
+	function selectionTargetAt(event: PointerEvent): SelectionTarget {
+		const position = screenPoint(event);
+		const flowPosition = screenToFlow(position);
+		const nodes = measuredNodes();
+		const nodeId = ownedNodeId(event) ?? findNodeAtPoint(nodes, flowPosition)?.id;
+		if (nodeId) return { type: 'node', id: nodeId };
+		const edgeId =
+			ownedEdgeId(event) ??
+			findEdgeAtPoint(nodes, store.edges, flowPosition, 10 / viewport.zoom)?.id;
+		return edgeId ? { type: 'edge', id: edgeId } : { type: 'pane' };
+	}
+
+	function selectionForTarget(target: SelectionTarget): SelectionIds {
+		if (target.type === 'node') {
+			return { nodeIds: new Set([target.id]), edgeIds: new Set() };
+		}
+		if (target.type === 'edge') {
+			return { nodeIds: new Set(), edgeIds: new Set([target.id]) };
+		}
+		return emptySelection();
+	}
+
+	function beginLeftSelection(event: PointerEvent): void {
+		if (isTextInputTarget(event.target) || startsOnOverlay(event)) return;
+		const target = selectionTargetAt(event);
+		const operation = getSelectionOperation(event);
+		const base = store.getSelection();
+		pendingSelection = { pointerId: event.pointerId, operation, base, target };
+		if (target.type === 'pane') return;
+		const affected = selectionForTarget(target);
+		if (operation === 'add') {
+			store.applySelection(operation, affected, base);
+		} else if (operation === 'remove') {
+			store.applySelection(operation, affected, base);
+			event.preventDefault();
+			event.stopPropagation();
+		}
+	}
+
+	function handleCanvasClickCapture(event: MouseEvent): void {
+		const gesture = pendingSelection;
+		if (!gesture || gesture.operation === 'replace') return;
+		store.applySelection(gesture.operation, selectionForTarget(gesture.target), gesture.base);
+		pendingSelection = null;
+		event.preventDefault();
+		event.stopPropagation();
+		closeMenusAndWheel();
+	}
+
+	function finishMarqueeSelection(): void {
+		const gesture = pendingSelection;
+		if (!gesture || gesture.target.type !== 'pane') return;
+		store.applySelection(gesture.operation, store.getSelection(), gesture.base);
+		pendingSelection = null;
+	}
+
+	function handlePaneClick(): void {
+		const gesture = pendingSelection;
+		if (gesture?.target.type === 'pane' && gesture.operation !== 'replace') {
+			const preserved = gesture.base;
+			pendingSelection = null;
+			queueMicrotask(() => store.replaceSelection(preserved));
+		} else {
+			store.clearSelection();
+			pendingSelection = null;
+		}
+		closeMenusAndWheel();
+	}
+
 	function clearHoldTimer(): void {
 		if (holdTimer) clearTimeout(holdTimer);
 		holdTimer = null;
@@ -181,6 +260,37 @@
 		clearHoldTimer();
 		releaseCapture(pointerId ?? capturedPointerId);
 		if (interaction.type !== 'editing-node') interaction = { type: 'idle' };
+		pendingSelection = null;
+	}
+
+	function cancelTransientInteraction(): void {
+		clearHoldTimer();
+		releaseCapture();
+		interaction = { type: 'idle' };
+		pendingSelection = null;
+	}
+
+	function handleDiagramKeydown(event: KeyboardEvent): void {
+		const blocked =
+			store.editingNodeId !== null ||
+			settingsOpen ||
+			downloadOpen ||
+			isTextInputTarget(event.target) ||
+			isModalTarget(event.target);
+		const shortcut = resolveDiagramShortcut(event, blocked);
+		if (!shortcut) return;
+		let handled = false;
+		if (shortcut === 'undo' && store.history.canUndo) {
+			cancelTransientInteraction();
+			handled = store.undo();
+		} else if (shortcut === 'redo' && store.history.canRedo) {
+			cancelTransientInteraction();
+			handled = store.redo();
+		} else if (shortcut === 'delete' && store.hasSelection) {
+			cancelTransientInteraction();
+			handled = store.deleteSelection();
+		}
+		if (handled) event.preventDefault();
 	}
 
 	function openWheel(
@@ -194,17 +304,25 @@
 	}
 
 	function handleCanvasPointerDown(event: PointerEvent): void {
-		if (event.button === LEFT_BUTTON) return;
+		if (event.button === LEFT_BUTTON) {
+			beginLeftSelection(event);
+			return;
+		}
 		if (event.button === MIDDLE_BUTTON) {
 			clearHoldTimer();
 			closeMenusAndWheel();
 			return;
 		}
-		if (event.button !== RIGHT_BUTTON || isTextTarget(event.target) || startsOnOverlay(event)) {
+		if (
+			event.button !== RIGHT_BUTTON ||
+			isTextInputTarget(event.target) ||
+			startsOnOverlay(event)
+		) {
 			return;
 		}
 
 		event.preventDefault();
+		pendingSelection = null;
 		clearHoldTimer();
 		const position = screenPoint(event);
 		const flowPosition = screenToFlow(position);
@@ -407,6 +525,7 @@
 		role="application"
 		aria-label="Diagram canvas"
 		onpointerdowncapture={handleCanvasPointerDown}
+		onclickcapture={handleCanvasClickCapture}
 		onpointermove={handleCanvasPointerMove}
 		onpointerup={handleCanvasPointerUp}
 		onpointercancel={(event) => cancelPointerInteraction(event.pointerId)}
@@ -414,7 +533,7 @@
 			if (event.button === MIDDLE_BUTTON) event.preventDefault();
 		}}
 		oncontextmenu={(event) => {
-			if (!isTextTarget(event.target)) event.preventDefault();
+			if (!isTextInputTarget(event.target)) event.preventDefault();
 		}}
 	>
 		{#if ready}
@@ -431,6 +550,7 @@
 				selectionOnDrag={true}
 				selectionMode={SelectionMode.Partial}
 				selectNodesOnDrag={true}
+				nodeDragThreshold={NODE_DRAG_THRESHOLD_PX}
 				connectionMode={ConnectionMode.Loose}
 				panOnDrag={[MIDDLE_BUTTON]}
 				panActivationKey={DISABLED_FLOW_KEY}
@@ -450,14 +570,21 @@
 					interaction = { type: 'idle' };
 					store.beginDrag();
 				}}
-				onnodedragstop={() => store.finishDrag()}
-				onnodeclick={() => closeMenusAndWheel()}
-				onedgeclick={() => closeMenusAndWheel()}
-				onpaneclick={() => {
-					store.clearSelection();
+				onnodedragstop={() => {
+					store.finishDrag();
+					pendingSelection = null;
+				}}
+				onnodeclick={() => {
+					pendingSelection = null;
 					closeMenusAndWheel();
 				}}
+				onedgeclick={() => {
+					pendingSelection = null;
+					closeMenusAndWheel();
+				}}
+				onpaneclick={handlePaneClick}
 				onselectionstart={closeMenusAndWheel}
+				onselectionend={finishMarqueeSelection}
 				onmovestart={closeMenusAndWheel}
 				onmove={(_event, nextViewport) => (viewport = nextViewport)}
 				onmoveend={handleMoveEnd}
@@ -532,7 +659,7 @@
 				interaction = { type: 'idle' };
 			}}
 			ondelete={() => {
-				if (interaction.type === 'node-context-menu') store.deleteNode(interaction.nodeId);
+				if (interaction.type === 'node-context-menu') store.deleteSelection();
 				interaction = { type: 'idle' };
 			}}
 			onclose={() => (interaction = { type: 'idle' })}
@@ -541,7 +668,7 @@
 		<EdgeContextMenu
 			position={interaction.screenPosition}
 			ondelete={() => {
-				if (interaction.type === 'edge-context-menu') store.deleteEdge(interaction.edgeId);
+				if (interaction.type === 'edge-context-menu') store.deleteSelection();
 				interaction = { type: 'idle' };
 			}}
 			onclose={() => (interaction = { type: 'idle' })}

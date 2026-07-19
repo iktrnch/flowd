@@ -5,8 +5,11 @@ import type {
 	DiagramNode,
 	DiagramSnapshot,
 	Point,
+	SelectionIds,
+	SelectionOperation,
 	ShapeType
 } from '$lib/types/diagram';
+import { reconcileSelection } from '$lib/utils/selection';
 import {
 	createDiagramDocument,
 	createEntityId,
@@ -33,12 +36,16 @@ export class DiagramStore {
 		return this.document.name;
 	}
 
+	get hasSelection(): boolean {
+		return this.nodes.some((node) => node.selected) || this.edges.some((edge) => edge.selected);
+	}
+
 	load(): void {
 		if (typeof window === 'undefined') return;
 		this.document = loadActiveDocument(window.localStorage);
 		this.nodes = this.document.nodes.map((node) => ({ ...node }));
 		this.edges = this.document.edges.map((edge) => ({ ...edge }));
-		this.history.clear();
+		this.history.initialize(this.snapshot());
 	}
 
 	destroy(): void {
@@ -119,25 +126,44 @@ export class DiagramStore {
 		return edge;
 	}
 
-	selectNode(id: string, toggle = false): void {
-		this.nodes = this.nodes.map((node) => ({
-			...node,
-			selected: toggle ? (node.id === id ? !node.selected : node.selected) : node.id === id
-		}));
-		if (!toggle) this.edges = this.edges.map((edge) => ({ ...edge, selected: false }));
+	getSelection(): SelectionIds {
+		return {
+			nodeIds: new Set(this.nodes.filter((node) => node.selected).map((node) => node.id)),
+			edgeIds: new Set(this.edges.filter((edge) => edge.selected).map((edge) => edge.id))
+		};
 	}
 
-	selectEdge(id: string, toggle = false): void {
-		this.edges = this.edges.map((edge) => ({
-			...edge,
-			selected: toggle ? (edge.id === id ? !edge.selected : edge.selected) : edge.id === id
-		}));
-		if (!toggle) this.nodes = this.nodes.map((node) => ({ ...node, selected: false }));
+	replaceSelection(ids: SelectionIds): void {
+		this.nodes = this.nodes.map((node) => ({ ...node, selected: ids.nodeIds.has(node.id) }));
+		this.edges = this.edges.map((edge) => ({ ...edge, selected: ids.edgeIds.has(edge.id) }));
+	}
+
+	addToSelection(ids: SelectionIds): void {
+		this.replaceSelection(reconcileSelection(this.getSelection(), ids, 'add'));
+	}
+
+	removeFromSelection(ids: SelectionIds): void {
+		this.replaceSelection(reconcileSelection(this.getSelection(), ids, 'remove'));
+	}
+
+	applySelection(
+		operation: SelectionOperation,
+		ids: SelectionIds,
+		base = this.getSelection()
+	): void {
+		this.replaceSelection(reconcileSelection(base, ids, operation));
+	}
+
+	selectNode(id: string): void {
+		this.replaceSelection({ nodeIds: new Set([id]), edgeIds: new Set() });
+	}
+
+	selectEdge(id: string): void {
+		this.replaceSelection({ nodeIds: new Set(), edgeIds: new Set([id]) });
 	}
 
 	clearSelection(): void {
-		this.nodes = this.nodes.map((node) => ({ ...node, selected: false }));
-		this.edges = this.edges.map((edge) => ({ ...edge, selected: false }));
+		this.replaceSelection({ nodeIds: new Set(), edgeIds: new Set() });
 	}
 
 	selectAll(): void {
@@ -269,20 +295,20 @@ export class DiagramStore {
 
 	finishDrag(): void {
 		if (!this.#dragBefore) return;
-		this.history.record(this.#dragBefore, this.snapshot());
+		const committed = this.history.record(this.#dragBefore, this.snapshot());
 		this.#dragBefore = null;
-		this.scheduleSave();
+		if (committed) this.scheduleSave();
 	}
 
 	undo(): boolean {
-		const snapshot = this.history.undo(this.snapshot());
+		const snapshot = this.history.undo();
 		if (!snapshot) return false;
 		this.restore(snapshot);
 		return true;
 	}
 
 	redo(): boolean {
-		const snapshot = this.history.redo(this.snapshot());
+		const snapshot = this.history.redo();
 		if (!snapshot) return false;
 		this.restore(snapshot);
 		return true;
@@ -314,8 +340,8 @@ export class DiagramStore {
 	}
 
 	private restore(snapshot: DiagramSnapshot): void {
-		this.nodes = snapshot.nodes;
-		this.edges = snapshot.edges;
+		this.nodes = snapshot.nodes.map((node) => ({ ...node, selected: false }));
+		this.edges = snapshot.edges.map((edge) => ({ ...edge, selected: false }));
 		this.editingNodeId = null;
 		this.scheduleSave();
 	}
